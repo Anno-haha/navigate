@@ -1,0 +1,609 @@
+{% extends "base.html" %}
+
+{% block title %}2D雷达视图 - ADS-B可视化系统{% endblock %}
+
+{% block extra_css %}
+<style>
+    #radar-container {
+        position: relative;
+        background: radial-gradient(circle, #001122 0%, #000000 100%);
+        border-radius: 15px;
+        overflow: hidden;
+    }
+    
+    #radar-svg {
+        width: 100%;
+        height: 100%;
+    }
+    
+    .radar-circle {
+        fill: none;
+        stroke: #00ff00;
+        stroke-width: 1;
+        opacity: 0.3;
+    }
+    
+    .radar-line {
+        stroke: #00ff00;
+        stroke-width: 1;
+        opacity: 0.2;
+    }
+    
+    .radar-text {
+        fill: #00ff00;
+        font-family: 'Courier New', monospace;
+        font-size: 12px;
+        text-anchor: middle;
+    }
+    
+    .aircraft-dot {
+        cursor: pointer;
+        transition: all 0.3s ease;
+    }
+    
+    .aircraft-dot:hover {
+        r: 8;
+        stroke-width: 3;
+    }
+    
+    .aircraft-trail {
+        fill: none;
+        stroke-width: 2;
+        opacity: 0.6;
+    }
+    
+    .aircraft-label {
+        fill: white;
+        font-family: 'Segoe UI', sans-serif;
+        font-size: 10px;
+        text-anchor: middle;
+        pointer-events: none;
+    }
+    
+    .radar-controls {
+        position: absolute;
+        top: 20px;
+        left: 20px;
+        z-index: 100;
+        background: rgba(0, 0, 0, 0.8);
+        border-radius: 10px;
+        padding: 15px;
+        min-width: 200px;
+    }
+    
+    .aircraft-details {
+        position: absolute;
+        top: 20px;
+        right: 20px;
+        z-index: 100;
+        background: rgba(0, 0, 0, 0.8);
+        border-radius: 10px;
+        padding: 15px;
+        max-width: 300px;
+        display: none;
+    }
+    
+    .range-selector {
+        margin-bottom: 15px;
+    }
+    
+    .sweep-line {
+        stroke: #00ff00;
+        stroke-width: 2;
+        opacity: 0.8;
+        transform-origin: center;
+    }
+    
+    .blip {
+        animation: blip 2s infinite;
+    }
+    
+    @keyframes blip {
+        0% { opacity: 1; }
+        50% { opacity: 0.3; }
+        100% { opacity: 1; }
+    }
+    
+    .altitude-legend {
+        position: absolute;
+        bottom: 20px;
+        left: 20px;
+        z-index: 100;
+        background: rgba(0, 0, 0, 0.8);
+        border-radius: 10px;
+        padding: 15px;
+    }
+    
+    .legend-item {
+        display: flex;
+        align-items: center;
+        margin-bottom: 5px;
+    }
+    
+    .legend-color {
+        width: 16px;
+        height: 16px;
+        border-radius: 50%;
+        margin-right: 8px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="card-title mb-0">
+                    <i class="fas fa-radar"></i>
+                    2D雷达监控 - 实时飞机追踪
+                </h5>
+            </div>
+            <div class="card-body p-0">
+                <div id="radar-container" style="height: 70vh; position: relative;">
+                    <!-- SVG雷达显示 -->
+                    <svg id="radar-svg" viewBox="0 0 800 600">
+                        <!-- 雷达背景 -->
+                        <defs>
+                            <radialGradient id="radarGradient" cx="50%" cy="50%" r="50%">
+                                <stop offset="0%" style="stop-color:#001122;stop-opacity:1" />
+                                <stop offset="100%" style="stop-color:#000000;stop-opacity:1" />
+                            </radialGradient>
+                        </defs>
+                        
+                        <rect width="800" height="600" fill="url(#radarGradient)"/>
+                        
+                        <!-- 雷达圆圈和网格 -->
+                        <g id="radar-grid"></g>
+                        
+                        <!-- 扫描线 -->
+                        <g id="sweep-container">
+                            <line id="sweep-line" class="sweep-line" x1="400" y1="300" x2="400" y2="100"/>
+                        </g>
+                        
+                        <!-- 飞机轨迹 -->
+                        <g id="aircraft-trails"></g>
+                        
+                        <!-- 飞机点 -->
+                        <g id="aircraft-dots"></g>
+                        
+                        <!-- 飞机标签 -->
+                        <g id="aircraft-labels"></g>
+                    </svg>
+                    
+                    <!-- 雷达控制面板 -->
+                    <div class="radar-controls">
+                        <h6><i class="fas fa-cog"></i> 雷达控制</h6>
+                        
+                        <div class="range-selector">
+                            <label>雷达范围</label>
+                            <select class="form-select form-select-sm" id="radar-range">
+                                <option value="20">20 km</option>
+                                <option value="50">50 km</option>
+                                <option value="100" selected>100 km</option>
+                                <option value="200">200 km</option>
+                            </select>
+                        </div>
+                        
+                        <div class="form-check mb-2">
+                            <input class="form-check-input" type="checkbox" id="show-trails" checked>
+                            <label class="form-check-label" for="show-trails">
+                                显示轨迹
+                            </label>
+                        </div>
+                        
+                        <div class="form-check mb-2">
+                            <input class="form-check-input" type="checkbox" id="show-sweep" checked>
+                            <label class="form-check-label" for="show-sweep">
+                                雷达扫描
+                            </label>
+                        </div>
+                        
+                        <div class="form-check mb-3">
+                            <input class="form-check-input" type="checkbox" id="show-labels" checked>
+                            <label class="form-check-label" for="show-labels">
+                                显示标签
+                            </label>
+                        </div>
+                        
+                        <button class="btn btn-primary btn-sm w-100" onclick="centerRadar()">
+                            <i class="fas fa-crosshairs"></i> 居中显示
+                        </button>
+                    </div>
+                    
+                    <!-- 飞机详情面板 -->
+                    <div class="aircraft-details" id="aircraft-details">
+                        <h6><i class="fas fa-plane"></i> 飞机详情</h6>
+                        <div id="aircraft-detail-content">
+                            <!-- 动态内容 -->
+                        </div>
+                        <button class="btn btn-secondary btn-sm mt-2" onclick="closeAircraftDetails()">
+                            关闭
+                        </button>
+                    </div>
+                    
+                    <!-- 高度图例 -->
+                    <div class="altitude-legend">
+                        <h6><i class="fas fa-layer-group"></i> 高度图例</h6>
+                        <div class="legend-item">
+                            <div class="legend-color" style="background-color: #ff4444;"></div>
+                            <span>低空 (&lt;10,000ft)</span>
+                        </div>
+                        <div class="legend-item">
+                            <div class="legend-color" style="background-color: #ffff44;"></div>
+                            <span>中空 (10,000-33,000ft)</span>
+                        </div>
+                        <div class="legend-item">
+                            <div class="legend-color" style="background-color: #4444ff;"></div>
+                            <span>高空 (&gt;33,000ft)</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 飞机信息卡片 -->
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h6 class="card-title mb-0">
+                    <i class="fas fa-list"></i>
+                    当前空域飞机列表
+                </h6>
+            </div>
+            <div class="card-body">
+                <div id="aircraft-cards" class="row">
+                    <!-- 动态生成飞机卡片 -->
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    // 雷达参数
+    let radarRange = 100; // km
+    let radarCenter = { x: 400, y: 300 };
+    let sweepAngle = 0;
+    let aircraftTrails = {};
+    
+    // 初始化雷达显示
+    function initRadar() {
+        drawRadarGrid();
+        startRadarSweep();
+    }
+    
+    // 绘制雷达网格
+    function drawRadarGrid() {
+        const grid = document.getElementById('radar-grid');
+        grid.innerHTML = '';
+        
+        // 绘制同心圆
+        const ranges = [20, 40, 60, 80, 100];
+        ranges.forEach(range => {
+            if (range <= radarRange) {
+                const radius = (range / radarRange) * 200;
+                const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                circle.setAttribute('cx', radarCenter.x);
+                circle.setAttribute('cy', radarCenter.y);
+                circle.setAttribute('r', radius);
+                circle.setAttribute('class', 'radar-circle');
+                grid.appendChild(circle);
+                
+                // 添加距离标签
+                const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                text.setAttribute('x', radarCenter.x + radius - 10);
+                text.setAttribute('y', radarCenter.y - 5);
+                text.setAttribute('class', 'radar-text');
+                text.textContent = range + 'km';
+                grid.appendChild(text);
+            }
+        });
+        
+        // 绘制方位线
+        for (let angle = 0; angle < 360; angle += 30) {
+            const radian = (angle - 90) * Math.PI / 180;
+            const x2 = radarCenter.x + Math.cos(radian) * 200;
+            const y2 = radarCenter.y + Math.sin(radian) * 200;
+            
+            const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+            line.setAttribute('x1', radarCenter.x);
+            line.setAttribute('y1', radarCenter.y);
+            line.setAttribute('x2', x2);
+            line.setAttribute('y2', y2);
+            line.setAttribute('class', 'radar-line');
+            grid.appendChild(line);
+            
+            // 添加方位标签
+            const textX = radarCenter.x + Math.cos(radian) * 220;
+            const textY = radarCenter.y + Math.sin(radian) * 220;
+            const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+            text.setAttribute('x', textX);
+            text.setAttribute('y', textY);
+            text.setAttribute('class', 'radar-text');
+            text.textContent = angle + '°';
+            grid.appendChild(text);
+        }
+        
+        // 中心点
+        const centerDot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        centerDot.setAttribute('cx', radarCenter.x);
+        centerDot.setAttribute('cy', radarCenter.y);
+        centerDot.setAttribute('r', 3);
+        centerDot.setAttribute('fill', '#ff0000');
+        grid.appendChild(centerDot);
+    }
+    
+    // 启动雷达扫描
+    function startRadarSweep() {
+        if (!document.getElementById('show-sweep').checked) return;
+        
+        setInterval(() => {
+            sweepAngle = (sweepAngle + 2) % 360;
+            updateSweepLine();
+        }, 50);
+    }
+    
+    // 更新扫描线
+    function updateSweepLine() {
+        const sweepLine = document.getElementById('sweep-line');
+        const radian = (sweepAngle - 90) * Math.PI / 180;
+        const x2 = radarCenter.x + Math.cos(radian) * 200;
+        const y2 = radarCenter.y + Math.sin(radian) * 200;
+        
+        sweepLine.setAttribute('x2', x2);
+        sweepLine.setAttribute('y2', y2);
+        
+        // 显示/隐藏扫描线
+        sweepLine.style.display = document.getElementById('show-sweep').checked ? 'block' : 'none';
+    }
+    
+    // 更新雷达显示
+    function updateRadarDisplay(aircraftData) {
+        updateAircraftDots(aircraftData);
+        updateAircraftLabels(aircraftData);
+        updateAircraftTrails(aircraftData);
+        updateAircraftCards(aircraftData);
+    }
+    
+    // 更新飞机点
+    function updateAircraftDots(aircraftData) {
+        const dotsContainer = document.getElementById('aircraft-dots');
+        dotsContainer.innerHTML = '';
+        
+        Object.values(aircraftData).forEach(aircraft => {
+            const position = enuToRadarPosition(aircraft.enu_e, aircraft.enu_n);
+            if (!position) return; // 超出雷达范围
+            
+            const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+            dot.setAttribute('cx', position.x);
+            dot.setAttribute('cy', position.y);
+            dot.setAttribute('r', 5);
+            dot.setAttribute('fill', getAircraftRadarColor(aircraft.altitude));
+            dot.setAttribute('stroke', '#ffffff');
+            dot.setAttribute('stroke-width', 1);
+            dot.setAttribute('class', 'aircraft-dot blip');
+            dot.setAttribute('data-icao', aircraft.icao);
+            
+            // 添加点击事件
+            dot.addEventListener('click', () => showAircraftDetails(aircraft));
+            
+            dotsContainer.appendChild(dot);
+        });
+    }
+    
+    // 更新飞机标签
+    function updateAircraftLabels(aircraftData) {
+        const labelsContainer = document.getElementById('aircraft-labels');
+        labelsContainer.innerHTML = '';
+        
+        if (!document.getElementById('show-labels').checked) return;
+        
+        Object.values(aircraftData).forEach(aircraft => {
+            const position = enuToRadarPosition(aircraft.enu_e, aircraft.enu_n);
+            if (!position) return;
+            
+            const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+            label.setAttribute('x', position.x);
+            label.setAttribute('y', position.y - 10);
+            label.setAttribute('class', 'aircraft-label');
+            label.textContent = aircraft.icao;
+            
+            labelsContainer.appendChild(label);
+        });
+    }
+    
+    // 更新飞机轨迹
+    function updateAircraftTrails(aircraftData) {
+        const trailsContainer = document.getElementById('aircraft-trails');
+        
+        if (!document.getElementById('show-trails').checked) {
+            trailsContainer.innerHTML = '';
+            return;
+        }
+        
+        Object.values(aircraftData).forEach(aircraft => {
+            const icao = aircraft.icao;
+            const position = enuToRadarPosition(aircraft.enu_e, aircraft.enu_n);
+            if (!position) return;
+            
+            // 初始化轨迹数组
+            if (!aircraftTrails[icao]) {
+                aircraftTrails[icao] = [];
+            }
+            
+            // 添加新位置
+            aircraftTrails[icao].push(position);
+            
+            // 限制轨迹长度
+            if (aircraftTrails[icao].length > 20) {
+                aircraftTrails[icao].shift();
+            }
+            
+            // 绘制轨迹
+            if (aircraftTrails[icao].length > 1) {
+                drawAircraftTrail(icao, aircraftTrails[icao], aircraft.altitude);
+            }
+        });
+    }
+    
+    // 绘制飞机轨迹
+    function drawAircraftTrail(icao, trail, altitude) {
+        const trailsContainer = document.getElementById('aircraft-trails');
+        
+        // 移除旧轨迹
+        const oldTrail = document.getElementById(`trail-${icao}`);
+        if (oldTrail) oldTrail.remove();
+        
+        // 创建路径
+        let pathData = `M ${trail[0].x} ${trail[0].y}`;
+        for (let i = 1; i < trail.length; i++) {
+            pathData += ` L ${trail[i].x} ${trail[i].y}`;
+        }
+        
+        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        path.setAttribute('id', `trail-${icao}`);
+        path.setAttribute('d', pathData);
+        path.setAttribute('class', 'aircraft-trail');
+        path.setAttribute('stroke', getAircraftRadarColor(altitude));
+        
+        trailsContainer.appendChild(path);
+    }
+    
+    // ENU坐标转雷达位置
+    function enuToRadarPosition(enu_e, enu_n) {
+        const distance = Math.sqrt(enu_e * enu_e + enu_n * enu_n) / 1000; // km
+        
+        if (distance > radarRange) return null; // 超出范围
+        
+        const angle = Math.atan2(enu_e, enu_n); // 弧度
+        const radius = (distance / radarRange) * 200;
+        
+        const x = radarCenter.x + radius * Math.sin(angle);
+        const y = radarCenter.y - radius * Math.cos(angle);
+        
+        return { x, y };
+    }
+    
+    // 获取飞机雷达颜色
+    function getAircraftRadarColor(altitude) {
+        if (altitude < 10000) return '#ff4444';      // 红色 - 低空
+        if (altitude < 33000) return '#ffff44';      // 黄色 - 中空
+        return '#4444ff';                            // 蓝色 - 高空
+    }
+    
+    // 显示飞机详情
+    function showAircraftDetails(aircraft) {
+        const detailsPanel = document.getElementById('aircraft-details');
+        const content = document.getElementById('aircraft-detail-content');
+        
+        const distance = Math.sqrt(aircraft.enu_e**2 + aircraft.enu_n**2) / 1000;
+        const bearing = Math.atan2(aircraft.enu_e, aircraft.enu_n) * 180 / Math.PI;
+        const bearingNormalized = (bearing + 360) % 360;
+        
+        content.innerHTML = `
+            <div class="mb-2">
+                <strong>ICAO:</strong> ${aircraft.icao}
+            </div>
+            <div class="mb-2">
+                <strong>位置:</strong> ${aircraft.latitude.toFixed(4)}°, ${aircraft.longitude.toFixed(4)}°
+            </div>
+            <div class="mb-2">
+                <strong>高度:</strong> ${formatAltitude(aircraft.altitude)}
+            </div>
+            <div class="mb-2">
+                <strong>距离:</strong> ${distance.toFixed(1)} km
+            </div>
+            <div class="mb-2">
+                <strong>方位:</strong> ${bearingNormalized.toFixed(0)}°
+            </div>
+            <div class="mb-2">
+                <strong>ENU:</strong> E${aircraft.enu_e.toFixed(0)}m, N${aircraft.enu_n.toFixed(0)}m, U${aircraft.enu_u.toFixed(0)}m
+            </div>
+        `;
+        
+        detailsPanel.style.display = 'block';
+    }
+    
+    // 关闭飞机详情
+    function closeAircraftDetails() {
+        document.getElementById('aircraft-details').style.display = 'none';
+    }
+    
+    // 更新飞机卡片
+    function updateAircraftCards(aircraftData) {
+        const cardsContainer = document.getElementById('aircraft-cards');
+        cardsContainer.innerHTML = '';
+        
+        Object.values(aircraftData).forEach(aircraft => {
+            const distance = Math.sqrt(aircraft.enu_e**2 + aircraft.enu_n**2) / 1000;
+            
+            const cardHtml = `
+                <div class="col-md-4 col-lg-3 mb-3">
+                    <div class="card h-100" style="background: rgba(255,255,255,0.1);">
+                        <div class="card-body">
+                            <h6 class="card-title">
+                                ${getAircraftEmoji(aircraft.altitude)} ${aircraft.icao}
+                            </h6>
+                            <p class="card-text small">
+                                <i class="fas fa-map-marker-alt"></i> ${distance.toFixed(1)} km<br>
+                                <i class="fas fa-arrows-alt-v"></i> ${formatAltitude(aircraft.altitude)}<br>
+                                <i class="fas fa-clock"></i> ${new Date(aircraft.timestamp).toLocaleTimeString()}
+                            </p>
+                            <button class="btn btn-outline-light btn-sm" 
+                                    onclick="showAircraftDetails(${JSON.stringify(aircraft).replace(/"/g, '&quot;')})">
+                                详情
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            cardsContainer.innerHTML += cardHtml;
+        });
+        
+        if (Object.keys(aircraftData).length === 0) {
+            cardsContainer.innerHTML = '<div class="col-12"><p class="text-muted text-center">暂无飞机数据</p></div>';
+        }
+    }
+    
+    // 居中雷达
+    function centerRadar() {
+        // 重置雷达显示
+        drawRadarGrid();
+    }
+    
+    // 更改雷达范围
+    function changeRadarRange() {
+        radarRange = parseInt(document.getElementById('radar-range').value);
+        drawRadarGrid();
+        aircraftTrails = {}; // 清除轨迹
+    }
+    
+    // 页面加载完成后初始化
+    document.addEventListener('DOMContentLoaded', function() {
+        initRadar();
+        
+        // 监听飞机数据更新
+        document.addEventListener('aircraftDataUpdated', function(event) {
+            updateRadarDisplay(event.detail.aircraft);
+        });
+        
+        // 控制面板事件
+        document.getElementById('radar-range').addEventListener('change', changeRadarRange);
+        document.getElementById('show-trails').addEventListener('change', () => {
+            if (!document.getElementById('show-trails').checked) {
+                document.getElementById('aircraft-trails').innerHTML = '';
+            }
+        });
+        document.getElementById('show-labels').addEventListener('change', () => {
+            updateAircraftLabels(aircraftData);
+        });
+    });
+</script>
+{% endblock %}

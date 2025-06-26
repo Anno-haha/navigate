@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}ADS-B 可视化系统{% endblock %}</title>
+    
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    
+    <!-- Font Awesome -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    
+    <!-- Three.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    
+    <!-- D3.js -->
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    
+    <!-- 自定义样式 -->
+    <style>
+        body {
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            color: white;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        
+        .navbar {
+            background: rgba(0, 0, 0, 0.8) !important;
+            backdrop-filter: blur(10px);
+        }
+        
+        .card {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            color: white;
+        }
+        
+        .btn-primary {
+            background: linear-gradient(45deg, #007bff, #0056b3);
+            border: none;
+        }
+        
+        .btn-primary:hover {
+            background: linear-gradient(45deg, #0056b3, #004085);
+        }
+        
+        .aircraft-card {
+            transition: transform 0.3s ease;
+            cursor: pointer;
+        }
+        
+        .aircraft-card:hover {
+            transform: translateY(-5px);
+        }
+        
+        .status-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 8px;
+        }
+        
+        .status-online {
+            background-color: #28a745;
+            box-shadow: 0 0 10px #28a745;
+        }
+        
+        .status-offline {
+            background-color: #dc3545;
+        }
+        
+        #visualization-container {
+            height: 70vh;
+            border-radius: 15px;
+            overflow: hidden;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+        }
+        
+        .stats-card {
+            background: linear-gradient(135deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.05));
+            border-radius: 15px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        
+        .aircraft-emoji {
+            font-size: 2rem;
+            margin-right: 10px;
+        }
+        
+        .loading-spinner {
+            display: none;
+            text-align: center;
+            padding: 20px;
+        }
+        
+        .alert-banner {
+            position: fixed;
+            top: 80px;
+            right: 20px;
+            z-index: 1050;
+            max-width: 400px;
+        }
+    </style>
+    
+    {% block extra_css %}{% endblock %}
+</head>
+<body>
+    <!-- 导航栏 -->
+    <nav class="navbar navbar-expand-lg navbar-dark">
+        <div class="container">
+            <a class="navbar-brand" href="/">
+                <i class="fas fa-plane"></i>
+                ADS-B 可视化系统
+            </a>
+            
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav me-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="/">
+                            <i class="fas fa-globe"></i> 3D地球视图
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/radar/">
+                            <i class="fas fa-radar"></i> 2D雷达视图
+                        </a>
+                    </li>
+                </ul>
+                
+                <ul class="navbar-nav">
+                    <li class="nav-item">
+                        <span class="navbar-text">
+                            <span class="status-indicator status-online" id="connection-status"></span>
+                            <span id="aircraft-count">{{ aircraft_count|default:0 }}</span> 架飞机
+                        </span>
+                    </li>
+                    <li class="nav-item">
+                        <span class="navbar-text">
+                            <i class="fas fa-clock"></i>
+                            <span id="last-update">{{ last_update|default:"--:--:--" }}</span>
+                        </span>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+    
+    <!-- 告警横幅 -->
+    <div id="alert-banner" class="alert-banner"></div>
+    
+    <!-- 主要内容 -->
+    <div class="container-fluid mt-4">
+        {% block content %}{% endblock %}
+    </div>
+    
+    <!-- 加载指示器 -->
+    <div id="loading-spinner" class="loading-spinner">
+        <div class="spinner-border text-primary" role="status">
+            <span class="visually-hidden">加载中...</span>
+        </div>
+        <p class="mt-2">正在加载数据...</p>
+    </div>
+    
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    
+    <!-- 基础JavaScript -->
+    <script>
+        // 全局变量
+        let aircraftData = {};
+        let websocket = null;
+        let lastUpdateTime = new Date();
+        
+        // 初始化WebSocket连接
+        function initWebSocket() {
+            // 这里应该连接到实际的WebSocket服务
+            console.log('WebSocket连接初始化...');
+            
+            // 模拟连接状态
+            updateConnectionStatus(true);
+        }
+        
+        // 更新连接状态
+        function updateConnectionStatus(connected) {
+            const indicator = document.getElementById('connection-status');
+            if (connected) {
+                indicator.className = 'status-indicator status-online';
+            } else {
+                indicator.className = 'status-indicator status-offline';
+            }
+        }
+        
+        // 更新飞机数量
+        function updateAircraftCount(count) {
+            document.getElementById('aircraft-count').textContent = count;
+        }
+        
+        // 更新最后更新时间
+        function updateLastUpdateTime() {
+            const now = new Date();
+            const timeString = now.toLocaleTimeString('zh-CN');
+            document.getElementById('last-update').textContent = timeString;
+            lastUpdateTime = now;
+        }
+        
+        // 显示告警
+        function showAlert(type, message, duration = 5000) {
+            const alertBanner = document.getElementById('alert-banner');
+            const alertDiv = document.createElement('div');
+            alertDiv.className = `alert alert-${type} alert-dismissible fade show`;
+            alertDiv.innerHTML = `
+                ${message}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            `;
+            
+            alertBanner.appendChild(alertDiv);
+            
+            // 自动移除告警
+            setTimeout(() => {
+                if (alertDiv.parentNode) {
+                    alertDiv.remove();
+                }
+            }, duration);
+        }
+        
+        // 显示/隐藏加载指示器
+        function showLoading(show = true) {
+            const spinner = document.getElementById('loading-spinner');
+            spinner.style.display = show ? 'block' : 'none';
+        }
+        
+        // 格式化距离
+        function formatDistance(meters) {
+            if (meters < 1000) {
+                return `${Math.round(meters)}m`;
+            } else {
+                return `${(meters / 1000).toFixed(1)}km`;
+            }
+        }
+        
+        // 格式化高度
+        function formatAltitude(feet) {
+            const meters = Math.round(feet * 0.3048);
+            return `${feet}ft (${meters}m)`;
+        }
+        
+        // 获取飞机emoji
+        function getAircraftEmoji(altitude) {
+            if (altitude < 10000) return '🛩️';
+            if (altitude < 30000) return '✈️';
+            return '🛫';
+        }
+        
+        // 页面加载完成后初始化
+        document.addEventListener('DOMContentLoaded', function() {
+            initWebSocket();
+            updateLastUpdateTime();
+            
+            // 定期更新时间显示
+            setInterval(updateLastUpdateTime, 1000);
+            
+            // 定期获取数据
+            setInterval(fetchAircraftData, 2000);
+        });
+        
+        // 获取飞机数据
+        async function fetchAircraftData() {
+            try {
+                const response = await fetch('/api/aircraft/');
+                const data = await response.json();
+                
+                if (data.status === 'success') {
+                    aircraftData = data.aircraft;
+                    updateAircraftCount(data.count);
+                    
+                    // 触发数据更新事件
+                    const event = new CustomEvent('aircraftDataUpdated', {
+                        detail: { aircraft: aircraftData, count: data.count }
+                    });
+                    document.dispatchEvent(event);
+                }
+            } catch (error) {
+                console.error('获取飞机数据失败:', error);
+                updateConnectionStatus(false);
+            }
+        }
+    </script>
+    
+    {% block extra_js %}{% endblock %}
+</body>
+</html>
