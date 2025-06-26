@@ -11,7 +11,7 @@ import math
 import os
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Optional, Tuple, Dict, List
+from typing import Optional, Tuple, List
 import logging
 
 
@@ -221,8 +221,8 @@ class SerialManager:
             )
             print(f"成功连接串口: {port_name}")
             return True
-        except Exception as e:
-            print(f"连接 {port_name} 失败: {e}")
+        except Exception:
+            # 静默处理连接失败，不输出错误信息
             return False
 
     def read_line(self) -> Optional[str]:
