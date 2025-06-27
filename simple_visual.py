@@ -209,6 +209,20 @@ class ADSBHTTPHandler(SimpleHTTPRequestHandler):
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{title} - ADS-B可视化</title>
+    <!-- Three.js 库 -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.144.0/build/three.min.js"></script>
+    <script>
+        // 手动加载OrbitControls
+        const script = document.createElement('script');
+        script.src = 'https://cdn.jsdelivr.net/npm/three@0.144.0/examples/js/controls/OrbitControls.js';
+        script.onload = function() {{
+            console.log('OrbitControls加载完成');
+        }};
+        script.onerror = function() {{
+            console.warn('OrbitControls加载失败');
+        }};
+        document.head.appendChild(script);
+    </script>
     <style>
         body {{
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -435,6 +449,91 @@ class ADSBHTTPHandler(SimpleHTTPRequestHandler):
             display: none;
         }}
 
+        /* 3D地球视图样式 - 高级感设计 */
+        #earth-container {{
+            position: relative;
+            width: 100%;
+            height: 500px;
+            background: radial-gradient(circle, #001122 0%, #000814 50%, #000000 100%);
+            border-radius: 16px;
+            border: 2px solid #00d4ff;
+            overflow: hidden;
+            box-shadow:
+                0 8px 32px rgba(0, 0, 0, 0.3),
+                0 0 40px rgba(0, 212, 255, 0.2),
+                inset 0 1px 0 rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+        }}
+
+        #earth-canvas {{
+            width: 100%;
+            height: 100%;
+            display: block;
+        }}
+
+        .earth-controls {{
+            position: absolute;
+            top: 15px;
+            left: 15px;
+            background: linear-gradient(145deg, rgba(0, 20, 40, 0.9), rgba(0, 10, 20, 0.95));
+            border: 1px solid #00d4ff;
+            border-radius: 12px;
+            padding: 16px;
+            z-index: 100;
+            color: #00d4ff;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            backdrop-filter: blur(15px);
+            box-shadow:
+                0 8px 25px rgba(0, 0, 0, 0.3),
+                0 0 20px rgba(0, 212, 255, 0.1),
+                inset 0 1px 0 rgba(255, 255, 255, 0.1);
+        }}
+
+        .earth-info {{
+            position: absolute;
+            top: 15px;
+            right: 15px;
+            background: linear-gradient(145deg, rgba(0, 20, 40, 0.9), rgba(0, 10, 20, 0.95));
+            border: 1px solid #00d4ff;
+            border-radius: 12px;
+            padding: 12px;
+            z-index: 100;
+            color: #00d4ff;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            backdrop-filter: blur(15px);
+            box-shadow:
+                0 8px 25px rgba(0, 0, 0, 0.3),
+                0 0 20px rgba(0, 212, 255, 0.1),
+                inset 0 1px 0 rgba(255, 255, 255, 0.1);
+        }}
+
+        .earth-controls select, .earth-controls input {{
+            background: linear-gradient(145deg, rgba(0, 30, 60, 0.8), rgba(0, 15, 30, 0.9));
+            color: #00d4ff;
+            border: 1px solid #00d4ff;
+            border-radius: 6px;
+            padding: 6px 8px;
+            font-family: inherit;
+            font-size: 11px;
+            backdrop-filter: blur(8px);
+            transition: all 0.3s ease;
+        }}
+
+        .earth-controls select:hover, .earth-controls input:hover {{
+            border-color: #00ffaa;
+            color: #00ffaa;
+            box-shadow: 0 0 10px rgba(0, 255, 170, 0.3);
+        }}
+
+        .earth-controls select:focus, .earth-controls input:focus {{
+            outline: none;
+            border-color: #00ffaa;
+            color: #00ffaa;
+            box-shadow: 0 0 15px rgba(0, 255, 170, 0.4);
+        }}
+
         /* 雷达视图样式 - 高级感设计 */
         #radar-container {{
             position: relative;
@@ -555,12 +654,54 @@ class ADSBHTTPHandler(SimpleHTTPRequestHandler):
         <div class="content">
             <!-- 3D地球视图 -->
             <div id="view-3d" class="view-container view-3d">
-                <h3>🌍 3D地球可视化区域</h3>
-                <p>在这里将显示3D地球和飞机位置</p>
-                <p>使用Three.js渲染真实地球模型</p>
-                <div id="visualization-placeholder" style="margin-top: 20px;">
-                    <p>🚧 3D可视化功能开发中...</p>
-                    <p>当前显示简化版本，完整3D可视化需要安装Three.js</p>
+                <h3>🌍 3D地球可视化</h3>
+                <div id="earth-container">
+                    <canvas id="earth-canvas"></canvas>
+
+                    <!-- 3D控制面板 -->
+                    <div class="earth-controls">
+                        <div style="margin-bottom: 8px;">
+                            <label>视角模式</label><br>
+                            <select id="camera-mode" onchange="changeCameraMode()">
+                                <option value="free">自由视角</option>
+                                <option value="follow">跟随飞机</option>
+                                <option value="overview">全局视图</option>
+                            </select>
+                        </div>
+
+                        <div style="margin-bottom: 8px;">
+                            <label>
+                                <input type="checkbox" id="show-orbits" onchange="toggleOrbits()" checked>
+                                显示轨迹
+                            </label>
+                        </div>
+
+                        <div style="margin-bottom: 8px;">
+                            <label>
+                                <input type="checkbox" id="show-labels-3d" onchange="toggleLabels3D()" checked>
+                                显示标签
+                            </label>
+                        </div>
+
+                        <div style="margin-bottom: 8px;">
+                            <label>
+                                <input type="checkbox" id="auto-rotate" onchange="toggleAutoRotate()">
+                                自动旋转
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- 3D信息面板 -->
+                    <div class="earth-info">
+                        <div style="margin-bottom: 5px;">
+                            <span id="earth-status" class="status-indicator status-online"></span>
+                            <span style="margin-left: 5px;">3D渲染</span>
+                        </div>
+                        <div style="font-size: 11px;">
+                            <div id="earth-aircraft-count">0 架飞机</div>
+                            <div id="earth-fps">FPS: 60</div>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -643,6 +784,29 @@ class ADSBHTTPHandler(SimpleHTTPRequestHandler):
     <script>
         let autoRefresh = true;
         let aircraftData = {{}};
+
+        // 雷达相关变量
+        let radarCanvas, radarCtx;
+        let radarCenter = {{x: 0, y: 0}};
+        let radarRange = 100; // km
+        let sweepAngle = 0;
+        let showSweep = true;
+        let showTrails = false;
+        let showLabels = true;
+        let radarAnimationId;
+        let radarAircraftData = {{}};
+
+        // 3D地球相关变量
+        let earthScene, earthCamera, earthRenderer, earthControls;
+        let earthSphere, earthGroup;
+        let aircraftMeshes = {{}};
+        let aircraftTrails = {{}};
+        let earthAnimationId;
+        let cameraMode = 'free';
+        let showOrbits = true;
+        let showLabels3D = true;
+        let autoRotate = false;
+        let earthAircraftData = {{}};
         
         // 获取飞机数据
         async function fetchAircraftData() {{
@@ -739,65 +903,63 @@ class ADSBHTTPHandler(SimpleHTTPRequestHandler):
                 // 计算高度变化
                 const altChange = plane.max_altitude - plane.min_altitude;
 
-                html += `
-                    <div class="aircraft-card ${{freshnessClass}}">
-                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                            <h4>${{emoji}} ${{plane.icao}}</h4>
-                            <div style="display: flex; flex-direction: column; align-items: flex-end; font-size: 0.8em;">
-                                <span style="background: rgba(255,255,255,0.2); padding: 2px 8px; border-radius: 10px; margin-bottom: 3px;">
-                                    ${{plane.update_count || 1}} 次更新
-                                </span>
-                                <span class="freshness-indicator ${{freshnessClass}}">
-                                    ${{freshnessIndicator}}
-                                </span>
-                            </div>
-                        </div>
+                html += '<div class="aircraft-card ' + freshnessClass + '">' +
+                    '<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">' +
+                        '<h4>' + emoji + ' ' + plane.icao + '</h4>' +
+                        '<div style="display: flex; flex-direction: column; align-items: flex-end; font-size: 0.8em;">' +
+                            '<span style="background: rgba(255,255,255,0.2); padding: 2px 8px; border-radius: 10px; margin-bottom: 3px;">' +
+                                (plane.update_count || 1) + ' 次更新' +
+                            '</span>' +
+                            '<span class="freshness-indicator ' + freshnessClass + '">' +
+                                freshnessIndicator +
+                            '</span>' +
+                        '</div>' +
+                    '</div>' +
 
-                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px;">
-                            <div>
-                                <p><strong>📍 当前位置:</strong><br>
-                                ${{plane.latitude.toFixed(4)}}°, ${{plane.longitude.toFixed(4)}}°</p>
-                                <p><strong>📏 距离:</strong> ${{distance.toFixed(1)}} km</p>
-                            </div>
-                            <div>
-                                <p><strong>✈️ 当前高度:</strong><br>
-                                ${{plane.altitude}}ft (${{Math.round(plane.altitude * 0.3048)}}m)</p>
-                                <p><strong>⚡ 速度:</strong> ${{plane.speed || 0}} km/h</p>
-                            </div>
-                        </div>
+                    '<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px;">' +
+                        '<div>' +
+                            '<p><strong>📍 当前位置:</strong><br>' +
+                            plane.latitude.toFixed(4) + '°, ' + plane.longitude.toFixed(4) + '°</p>' +
+                            '<p><strong>📏 距离:</strong> ' + distance.toFixed(1) + ' km</p>' +
+                        '</div>' +
+                        '<div>' +
+                            '<p><strong>✈️ 当前高度:</strong><br>' +
+                            plane.altitude + 'ft (' + Math.round(plane.altitude * 0.3048) + 'm)</p>' +
+                            '<p><strong>⚡ 速度:</strong> ' + (plane.speed || 0) + ' km/h</p>' +
+                        '</div>' +
+                    '</div>' +
 
-                        <div style="background: rgba(255,255,255,0.1); padding: 8px; border-radius: 5px; margin-bottom: 8px;">
-                            <p style="margin: 2px 0;"><strong>📊 高度统计:</strong></p>
-                            <p style="margin: 2px 0; font-size: 0.9em;">
-                                最高: ${{plane.max_altitude}}ft |
-                                最低: ${{plane.min_altitude}}ft |
-                                平均: ${{plane.avg_altitude}}ft
-                                ${{altChange > 1000 ? '<br><span style="color: #ffd700;">⚠️ 高度变化: ' + altChange + 'ft</span>' : ''}}
-                            </p>
-                        </div>
+                    '<div style="background: rgba(255,255,255,0.1); padding: 8px; border-radius: 5px; margin-bottom: 8px;">' +
+                        '<p style="margin: 2px 0;"><strong>📊 高度统计:</strong></p>' +
+                        '<p style="margin: 2px 0; font-size: 0.9em;">' +
+                            '最高: ' + plane.max_altitude + 'ft | ' +
+                            '最低: ' + plane.min_altitude + 'ft | ' +
+                            '平均: ' + plane.avg_altitude + 'ft' +
+                            (altChange > 1000 ? '<br><span style="color: #ffd700;">⚠️ 高度变化: ' + altChange + 'ft</span>' : '') +
+                        '</p>' +
+                    '</div>' +
 
-                        <div style="background: rgba(255,255,255,0.1); padding: 8px; border-radius: 5px; margin-bottom: 8px;">
-                            <p style="margin: 2px 0;"><strong>🕒 时间信息:</strong></p>
-                            <p style="margin: 2px 0; font-size: 0.9em;">
-                                首次发现: ${{firstSeen.toLocaleTimeString()}}<br>
-                                最后更新: ${{lastSeen.toLocaleTimeString()}}
-                                ${{flightDuration > 0 ? '<br>跟踪时长: ' + flightDuration + ' 分钟' : ''}}
-                            </p>
-                        </div>
+                    '<div style="background: rgba(255,255,255,0.1); padding: 8px; border-radius: 5px; margin-bottom: 8px;">' +
+                        '<p style="margin: 2px 0;"><strong>🕒 时间信息:</strong></p>' +
+                        '<p style="margin: 2px 0; font-size: 0.9em;">' +
+                            '首次发现: ' + firstSeen.toLocaleTimeString() + '<br>' +
+                            '最后更新: ' + lastSeen.toLocaleTimeString() +
+                            (flightDuration > 0 ? '<br>跟踪时长: ' + flightDuration + ' 分钟' : '') +
+                        '</p>' +
+                    '</div>' +
 
-                        <details style="margin-top: 8px;">
-                            <summary style="cursor: pointer; color: #87ceeb;">🔍 详细坐标信息</summary>
-                            <div style="margin-top: 5px; font-size: 0.9em;">
-                                <p><strong>ENU坐标:</strong><br>
-                                E: ${{plane.enu_e.toFixed(0)}}m |
-                                N: ${{plane.enu_n.toFixed(0)}}m |
-                                U: ${{plane.enu_u.toFixed(0)}}m</p>
-                                ${{plane.positions && plane.positions.length > 1 ?
-                                    '<p><strong>位置历史:</strong> ' + plane.positions.length + ' 个记录点</p>' : ''}}
-                            </div>
-                        </details>
-                    </div>
-                `;
+                    '<details style="margin-top: 8px;">' +
+                        '<summary style="cursor: pointer; color: #87ceeb;">🔍 详细坐标信息</summary>' +
+                        '<div style="margin-top: 5px; font-size: 0.9em;">' +
+                            '<p><strong>ENU坐标:</strong><br>' +
+                            'E: ' + plane.enu_e.toFixed(0) + 'm | ' +
+                            'N: ' + plane.enu_n.toFixed(0) + 'm | ' +
+                            'U: ' + plane.enu_u.toFixed(0) + 'm</p>' +
+                            (plane.positions && plane.positions.length > 1 ?
+                                '<p><strong>位置历史:</strong> ' + plane.positions.length + ' 个记录点</p>' : '') +
+                        '</div>' +
+                    '</details>' +
+                '</div>';
             }});
             
             listContainer.innerHTML = html;
@@ -813,28 +975,27 @@ class ADSBHTTPHandler(SimpleHTTPRequestHandler):
                     const stats = data.statistics;
                     const statsContainer = document.getElementById('statistics');
 
-                    statsContainer.innerHTML = `
-                        <div class="stat-card">
-                            <h4>总飞机数</h4>
-                            <h2>${{stats.total_aircraft || 0}}</h2>
-                        </div>
-                        <div class="stat-card">
-                            <h4>平均高度</h4>
-                            <h2>${{Math.round(stats.average_altitude || 0)}}ft</h2>
-                        </div>
-                        <div class="stat-card">
-                            <h4>高度分布</h4>
-                            <p>低空: ${{(stats.altitude_distribution && stats.altitude_distribution['低空 (0-10000ft)']) || 0}}</p>
-                            <p>中空: ${{(stats.altitude_distribution && stats.altitude_distribution['中空 (10000-33000ft)']) || 0}}</p>
-                            <p>高空: ${{(stats.altitude_distribution && stats.altitude_distribution['高空 (33000ft+)']) || 0}}</p>
-                        </div>
-                        <div class="stat-card">
-                            <h4>数据新鲜度</h4>
-                            <p style="color: #00ff88; text-shadow: 0 0 8px rgba(0,255,136,0.5);">🟢 实时: ${{(stats.freshness_distribution && stats.freshness_distribution['实时 (<30秒)']) || 0}}</p>
-                            <p style="color: #ffdd00; text-shadow: 0 0 8px rgba(255,221,0,0.5);">🟡 最近: ${{(stats.freshness_distribution && stats.freshness_distribution['最近 (30秒-5分钟)']) || 0}}</p>
-                            <p style="color: #ff6600; text-shadow: 0 0 8px rgba(255,102,0,0.5);">🟠 较旧: ${{(stats.freshness_distribution && stats.freshness_distribution['较旧 (5-60分钟)']) || 0}}</p>
-                        </div>
-                    `;
+                    statsContainer.innerHTML =
+                        '<div class="stat-card">' +
+                            '<h4>总飞机数</h4>' +
+                            '<h2>' + (stats.total_aircraft || 0) + '</h2>' +
+                        '</div>' +
+                        '<div class="stat-card">' +
+                            '<h4>平均高度</h4>' +
+                            '<h2>' + Math.round(stats.average_altitude || 0) + 'ft</h2>' +
+                        '</div>' +
+                        '<div class="stat-card">' +
+                            '<h4>高度分布</h4>' +
+                            '<p>低空: ' + ((stats.altitude_distribution && stats.altitude_distribution['低空 (0-10000ft)']) || 0) + '</p>' +
+                            '<p>中空: ' + ((stats.altitude_distribution && stats.altitude_distribution['中空 (10000-33000ft)']) || 0) + '</p>' +
+                            '<p>高空: ' + ((stats.altitude_distribution && stats.altitude_distribution['高空 (33000ft+)']) || 0) + '</p>' +
+                        '</div>' +
+                        '<div class="stat-card">' +
+                            '<h4>数据新鲜度</h4>' +
+                            '<p style="color: #00ff88; text-shadow: 0 0 8px rgba(0,255,136,0.5);">🟢 实时: ' + ((stats.freshness_distribution && stats.freshness_distribution['实时 (<30秒)']) || 0) + '</p>' +
+                            '<p style="color: #ffdd00; text-shadow: 0 0 8px rgba(255,221,0,0.5);">🟡 最近: ' + ((stats.freshness_distribution && stats.freshness_distribution['最近 (30秒-5分钟)']) || 0) + '</p>' +
+                            '<p style="color: #ff6600; text-shadow: 0 0 8px rgba(255,102,0,0.5);">🟠 较旧: ' + ((stats.freshness_distribution && stats.freshness_distribution['较旧 (5-60分钟)']) || 0) + '</p>' +
+                        '</div>';
                 }}
             }} catch (error) {{
                 console.error('获取统计信息失败:', error);
@@ -853,6 +1014,195 @@ class ADSBHTTPHandler(SimpleHTTPRequestHandler):
             btn.textContent = autoRefresh ? '⏸️ 停止自动刷新' : '▶️ 开始自动刷新';
         }}
 
+        // 3D地球初始化和渲染函数
+        function initEarth() {{
+            console.log('开始初始化3D地球...');
+
+            // 检查Three.js是否加载
+            if (typeof THREE === 'undefined') {{
+                console.error('Three.js库未加载');
+                document.getElementById('earth-status').className = 'status-indicator status-offline';
+
+                // 显示备用信息
+                const canvas = document.getElementById('earth-canvas');
+                if (canvas) {{
+                    const ctx = canvas.getContext('2d');
+                    canvas.width = canvas.offsetWidth;
+                    canvas.height = canvas.offsetHeight;
+
+                    ctx.fillStyle = '#001122';
+                    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+                    ctx.fillStyle = '#00d4ff';
+                    ctx.font = '20px Arial';
+                    ctx.textAlign = 'center';
+                    ctx.fillText('Three.js库加载失败', canvas.width/2, canvas.height/2 - 20);
+                    ctx.fillText('请检查网络连接', canvas.width/2, canvas.height/2 + 20);
+                }}
+                return;
+            }}
+
+            if (!earthScene) {{
+                const container = document.getElementById('earth-container');
+                const canvas = document.getElementById('earth-canvas');
+
+                if (!container || !canvas) {{
+                    console.error('找不到3D容器或画布元素');
+                    return;
+                }}
+
+                // 创建场景
+                earthScene = new THREE.Scene();
+
+                // 创建相机
+                earthCamera = new THREE.PerspectiveCamera(75, container.clientWidth / container.clientHeight, 0.1, 10000);
+                earthCamera.position.set(0, 0, 3);
+
+                // 创建渲染器
+                earthRenderer = new THREE.WebGLRenderer({{ canvas: canvas, antialias: true, alpha: true }});
+                earthRenderer.setSize(container.clientWidth, container.clientHeight);
+                earthRenderer.setClearColor(0x000000, 0);
+
+                // 创建地球组
+                earthGroup = new THREE.Group();
+                earthScene.add(earthGroup);
+
+                // 创建地球几何体
+                const earthGeometry = new THREE.SphereGeometry(1, 64, 32);
+
+                // 创建地球材质（简化版，使用纯色）
+                const earthMaterial = new THREE.MeshPhongMaterial({{
+                    color: 0x2233ff,
+                    transparent: true,
+                    opacity: 0.8,
+                    wireframe: false
+                }});
+
+                earthSphere = new THREE.Mesh(earthGeometry, earthMaterial);
+                earthGroup.add(earthSphere);
+
+                // 添加地球网格线
+                const wireframeGeometry = new THREE.SphereGeometry(1.01, 32, 16);
+                const wireframeMaterial = new THREE.MeshBasicMaterial({{
+                    color: 0x00d4ff,
+                    wireframe: true,
+                    transparent: true,
+                    opacity: 0.3
+                }});
+                const wireframeSphere = new THREE.Mesh(wireframeGeometry, wireframeMaterial);
+                earthGroup.add(wireframeSphere);
+
+                // 添加光源
+                const ambientLight = new THREE.AmbientLight(0x404040, 0.6);
+                earthScene.add(ambientLight);
+
+                const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+                directionalLight.position.set(1, 1, 1);
+                earthScene.add(directionalLight);
+
+                // 创建控制器
+                if (typeof THREE.OrbitControls !== 'undefined') {{
+                    earthControls = new THREE.OrbitControls(earthCamera, earthRenderer.domElement);
+                    earthControls.enableDamping = true;
+                    earthControls.dampingFactor = 0.05;
+                    earthControls.enableZoom = true;
+                    earthControls.autoRotate = false;
+                    console.log('OrbitControls初始化成功');
+                }} else {{
+                    console.warn('OrbitControls未加载，使用基础鼠标控制');
+                    // 添加基础鼠标控制
+                    let mouseDown = false;
+                    let mouseX = 0, mouseY = 0;
+
+                    canvas.addEventListener('mousedown', (e) => {{
+                        mouseDown = true;
+                        mouseX = e.clientX;
+                        mouseY = e.clientY;
+                    }});
+
+                    canvas.addEventListener('mouseup', () => {{
+                        mouseDown = false;
+                    }});
+
+                    canvas.addEventListener('mousemove', (e) => {{
+                        if (mouseDown) {{
+                            const deltaX = e.clientX - mouseX;
+                            const deltaY = e.clientY - mouseY;
+
+                            earthGroup.rotation.y += deltaX * 0.01;
+                            earthGroup.rotation.x += deltaY * 0.01;
+
+                            mouseX = e.clientX;
+                            mouseY = e.clientY;
+                        }}
+                    }});
+
+                    canvas.addEventListener('wheel', (e) => {{
+                        e.preventDefault();
+                        const scale = e.deltaY > 0 ? 1.1 : 0.9;
+                        earthCamera.position.multiplyScalar(scale);
+                    }});
+                }}
+
+                // 窗口大小调整
+                window.addEventListener('resize', resizeEarth);
+
+                // 开始渲染循环
+                startEarthAnimation();
+
+                console.log('3D地球初始化完成');
+                document.getElementById('earth-status').className = 'status-indicator status-online';
+            }}
+        }}
+
+        function resizeEarth() {{
+            const container = document.getElementById('earth-container');
+            if (earthCamera && earthRenderer) {{
+                earthCamera.aspect = container.clientWidth / container.clientHeight;
+                earthCamera.updateProjectionMatrix();
+                earthRenderer.setSize(container.clientWidth, container.clientHeight);
+            }}
+        }}
+
+        function startEarthAnimation() {{
+            function animate() {{
+                try {{
+                    if (earthControls) {{
+                        earthControls.update();
+                    }}
+
+                    if (autoRotate && earthGroup) {{
+                        earthGroup.rotation.y += 0.005;
+                    }}
+
+                    renderEarth();
+                    earthAnimationId = requestAnimationFrame(animate);
+                }} catch (error) {{
+                    console.error('3D动画错误:', error);
+                    document.getElementById('earth-status').className = 'status-indicator status-offline';
+                }}
+            }}
+            animate();
+        }}
+
+        function renderEarth() {{
+            try {{
+                if (earthRenderer && earthScene && earthCamera) {{
+                    earthRenderer.render(earthScene, earthCamera);
+
+                    // 更新FPS显示
+                    const fpsElement = document.getElementById('earth-fps');
+                    if (fpsElement) {{
+                        fpsElement.textContent = 'FPS: 60';
+                    }}
+                }} else {{
+                    console.warn('3D渲染器、场景或相机未初始化');
+                }}
+            }} catch (error) {{
+                console.error('3D渲染错误:', error);
+            }}
+        }}
+
         // 视图切换功能
         function showView(viewType) {{
             // 隐藏所有视图
@@ -868,6 +1218,7 @@ class ADSBHTTPHandler(SimpleHTTPRequestHandler):
             if (viewType === '3d') {{
                 document.getElementById('view-3d').style.display = 'block';
                 document.getElementById('btn-3d').classList.add('active');
+                initEarth();
             }} else if (viewType === 'radar') {{
                 document.getElementById('view-radar').style.display = 'block';
                 document.getElementById('btn-radar').classList.add('active');
@@ -1162,9 +1513,122 @@ class ADSBHTTPHandler(SimpleHTTPRequestHandler):
             showLabels = document.getElementById('show-labels').checked;
         }}
 
+        // 3D地球控制函数
+        function changeCameraMode() {{
+            cameraMode = document.getElementById('camera-mode').value;
+
+            if (cameraMode === 'overview' && earthCamera) {{
+                earthCamera.position.set(0, 0, 5);
+                if (earthControls) {{
+                    earthControls.reset();
+                }}
+            }}
+        }}
+
+        function toggleOrbits() {{
+            showOrbits = document.getElementById('show-orbits').checked;
+            // 更新轨迹显示
+            Object.values(aircraftTrails).forEach(trail => {{
+                if (trail) {{
+                    trail.visible = showOrbits;
+                }}
+            }});
+        }}
+
+        function toggleLabels3D() {{
+            showLabels3D = document.getElementById('show-labels-3d').checked;
+            // 更新3D标签显示
+        }}
+
+        function toggleAutoRotate() {{
+            autoRotate = document.getElementById('auto-rotate').checked;
+            if (earthControls) {{
+                earthControls.autoRotate = autoRotate;
+            }}
+        }}
+
+        function updateEarthData() {{
+            earthAircraftData = aircraftData;
+
+            // 更新3D飞机显示
+            updateAircraftMeshes();
+
+            // 更新信息面板
+            const count = Object.keys(earthAircraftData).length;
+            document.getElementById('earth-aircraft-count').textContent = count + ' 架飞机';
+            document.getElementById('earth-status').className = 'status-indicator status-online';
+        }}
+
+        function updateAircraftMeshes() {{
+            // 清理不存在的飞机
+            Object.keys(aircraftMeshes).forEach(icao => {{
+                if (!earthAircraftData[icao]) {{
+                    if (aircraftMeshes[icao]) {{
+                        earthGroup.remove(aircraftMeshes[icao]);
+                        delete aircraftMeshes[icao];
+                    }}
+                    if (aircraftTrails[icao]) {{
+                        earthGroup.remove(aircraftTrails[icao]);
+                        delete aircraftTrails[icao];
+                    }}
+                }}
+            }});
+
+            // 更新或创建飞机网格
+            Object.values(earthAircraftData).forEach(aircraft => {{
+                const icao = aircraft.icao;
+
+                // 将ENU坐标转换为3D世界坐标
+                const scale = 0.001; // 缩放因子
+                const x = aircraft.enu_e * scale;
+                const y = aircraft.enu_u * scale;
+                const z = -aircraft.enu_n * scale; // Z轴反向
+
+                if (!aircraftMeshes[icao]) {{
+                    // 创建新的飞机网格
+                    const geometry = new THREE.SphereGeometry(0.02, 8, 6);
+                    const material = new THREE.MeshBasicMaterial({{
+                        color: getAircraft3DColor(aircraft.altitude)
+                    }});
+                    const mesh = new THREE.Mesh(geometry, material);
+                    aircraftMeshes[icao] = mesh;
+                    earthGroup.add(mesh);
+
+                    // 创建轨迹
+                    if (showOrbits) {{
+                        const trailGeometry = new THREE.BufferGeometry();
+                        const trailMaterial = new THREE.LineBasicMaterial({{
+                            color: getAircraft3DColor(aircraft.altitude),
+                            transparent: true,
+                            opacity: 0.6
+                        }});
+                        const trail = new THREE.Line(trailGeometry, trailMaterial);
+                        aircraftTrails[icao] = trail;
+                        earthGroup.add(trail);
+                    }}
+                }}
+
+                // 更新位置
+                if (aircraftMeshes[icao]) {{
+                    aircraftMeshes[icao].position.set(x, y, z);
+                }}
+            }});
+        }}
+
+        function getAircraft3DColor(altitude) {{
+            if (altitude < 10000) return 0xff3366;  // 高饱和度红色
+            if (altitude < 33000) return 0xffdd00;  // 高饱和度黄色
+            return 0x3366ff;  // 高饱和度蓝色
+        }}
+
         // 初始化
         document.addEventListener('DOMContentLoaded', function() {{
             fetchAircraftData();
+
+            // 延迟初始化3D地球视图，确保Three.js库完全加载
+            setTimeout(() => {{
+                initEarth();
+            }}, 1000);
 
             // 自动刷新
             setInterval(() => {{
@@ -1172,6 +1636,9 @@ class ADSBHTTPHandler(SimpleHTTPRequestHandler):
                     fetchAircraftData();
                     if (document.getElementById('view-radar').style.display !== 'none') {{
                         updateRadarData();
+                    }}
+                    if (document.getElementById('view-3d').style.display !== 'none') {{
+                        updateEarthData();
                     }}
                 }}
             }}, 2000);
@@ -1231,6 +1698,8 @@ class ADSBVisualizationSystem:
                                 'max_altitude': aircraft['altitude'],
                                 'min_altitude': aircraft['altitude'],
                                 'avg_altitude': aircraft['altitude'],
+                                'speed': 0,  # 初始速度为0
+                                'speed_history': [],  # 速度历史用于平滑
                                 # 传递nav.py的时间戳字段
                                 'nav_timestamp': aircraft.get('nav_timestamp'),
                                 'nav_time_unix': aircraft.get('nav_time_unix'),
@@ -1239,20 +1708,58 @@ class ADSBVisualizationSystem:
                             # 更新现有飞机数据
                             prev_data = aircraft_data[icao]
 
-                            # 计算速度（简化计算）
-                            prev_time = datetime.fromisoformat(prev_data['timestamp'])
-                            time_diff = (current_time - prev_time).total_seconds()
-
-                            if time_diff > 0:
-                                # 计算距离变化
-                                prev_enu = (prev_data['enu_e'], prev_data['enu_n'], prev_data['enu_u'])
-                                distance_moved = ((enu_coords[0] - prev_enu[0])**2 +
-                                                (enu_coords[1] - prev_enu[1])**2 +
-                                                (enu_coords[2] - prev_enu[2])**2)**0.5
-                                speed_ms = distance_moved / time_diff if time_diff > 0 else 0
-                                speed_kmh = speed_ms * 3.6
+                            # 计算速度（基于nav.py时间戳的精确计算）
+                            # 优先使用nav.py的时间戳，如果没有则使用系统时间戳
+                            if 'nav_time_unix' in prev_data and prev_data['nav_time_unix'] and aircraft.get('nav_time_unix'):
+                                # 使用nav.py的精确时间戳
+                                time_diff = aircraft['nav_time_unix'] - prev_data['nav_time_unix']
                             else:
-                                speed_kmh = prev_data.get('speed', 0)
+                                # 降级到系统时间戳
+                                prev_time = datetime.fromisoformat(prev_data['timestamp'])
+                                time_diff = (current_time - prev_time).total_seconds()
+
+                            if time_diff > 0 and time_diff < 300:  # 只计算5分钟内的速度变化
+                                # 计算地面距离变化（忽略垂直分量，更符合航空惯例）
+                                prev_enu = (prev_data['enu_e'], prev_data['enu_n'], prev_data['enu_u'])
+                                ground_distance = ((enu_coords[0] - prev_enu[0])**2 +
+                                                 (enu_coords[1] - prev_enu[1])**2)**0.5
+
+                                # 计算瞬时地面速度
+                                instant_speed_ms = ground_distance / time_diff if time_diff > 0 else 0
+                                instant_speed_kmh = instant_speed_ms * 3.6
+
+                                # 速度合理性检查
+                                if instant_speed_kmh > 1200:  # 超音速限制
+                                    instant_speed_kmh = prev_data.get('speed', 0)
+                                elif instant_speed_kmh < 10 and ground_distance < 50:  # 静止或微小移动
+                                    instant_speed_kmh = 0
+
+                                # 速度平滑处理
+                                speed_history = prev_data.get('speed_history', [])
+                                speed_history.append(instant_speed_kmh)
+
+                                # 保留最近5个速度值用于平滑
+                                if len(speed_history) > 5:
+                                    speed_history = speed_history[-5:]
+
+                                # 计算平滑速度（去除异常值后的平均值）
+                                if len(speed_history) >= 3:
+                                    # 去除最高和最低值，计算平均值
+                                    sorted_speeds = sorted(speed_history)
+                                    if len(sorted_speeds) >= 3:
+                                        trimmed_speeds = sorted_speeds[1:-1]  # 去除最高和最低
+                                        speed_kmh = sum(trimmed_speeds) / len(trimmed_speeds)
+                                    else:
+                                        speed_kmh = sum(speed_history) / len(speed_history)
+                                else:
+                                    speed_kmh = instant_speed_kmh
+
+                                # 更新速度历史
+                                prev_data['speed_history'] = speed_history
+
+                            else:
+                                # 时间差异常或过长，逐渐降低速度
+                                speed_kmh = prev_data.get('speed', 0) * 0.95
 
                             # 更新位置历史（保留最近20个位置）
                             positions = prev_data.get('positions', [])
@@ -1282,6 +1789,7 @@ class ADSBVisualizationSystem:
                                 'last_seen': current_time.isoformat(),
                                 'update_count': prev_data.get('update_count', 0) + 1,
                                 'speed': round(speed_kmh, 1),
+                                'speed_history': prev_data.get('speed_history', []),  # 保持速度历史
                                 'positions': positions,
                                 'altitudes': altitudes,
                                 'max_altitude': max_alt,
@@ -1300,13 +1808,11 @@ class ADSBVisualizationSystem:
                     if 'nav_time_unix' in data and data['nav_time_unix']:
                         nav_time = datetime.fromtimestamp(data['nav_time_unix'])
                         time_diff = (current_time - nav_time).total_seconds()
-                        time_source = "nav.py"
                     else:
                         last_seen = datetime.fromisoformat(data.get('last_seen', data['timestamp']))
                         time_diff = (current_time - last_seen).total_seconds()
-                        time_source = "system"
 
-                    if time_diff > 3600:  # 60分钟过期
+                    if time_diff > 86400:  # 24小时过期（临时设置以显示历史数据）
                         expired_icaos.append(icao)
                         # 静默清理过期数据，不输出到终端
 
@@ -1358,11 +1864,8 @@ def main():
         print("1. 在另一个终端窗口运行: python nav.py")
         print("2. 确保ADS-B接收器正常工作")
         print("3. 等待数据采集稳定后再启动可视化系统")
-
-        response = input("\n是否继续启动可视化系统? (y/n): ").lower().strip()
-        if response not in ['y', 'yes', '是']:
-            print("已取消启动")
-            return
+        print("\n自动继续启动可视化系统...")
+        # 自动继续，不等待用户输入
 
     print("\n💡 提示: 可视化系统将与nav.py并行运行，不会影响数据采集")
     
