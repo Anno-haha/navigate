@@ -6,6 +6,7 @@
 import os
 import time
 import errno
+from datetime import datetime
 from typing import List, Optional
 
 # 尝试导入fcntl（仅在Unix/Linux系统可用）
@@ -155,13 +156,25 @@ class SafeADSBDataReader:
             return dict(self.data_cache)
     
     def _parse_line(self, line: str) -> Optional[dict]:
-        """解析日志行"""
+        """解析日志行 - 使用nav.py的原始时间戳"""
         try:
             parts = line.strip().split(',')
             if len(parts) >= 11:
+                # 解析nav.py输出的时间戳格式: 'YYYY-MM-DD HH:MM:SS'
+                nav_timestamp = parts[0]
+                nav_time = datetime.strptime(nav_timestamp, '%Y-%m-%d %H:%M:%S')
+                nav_time_unix = nav_time.timestamp()
+
+                icao = parts[1]
+
+                # 调试特定飞机的时间戳解析（可选）
+                # if icao == '78127C':
+                #     print(f"[DEBUG] 解析78127C: nav_timestamp={nav_timestamp}, nav_time_unix={nav_time_unix}")
+
                 return {
-                    'timestamp': parts[0],
-                    'icao': parts[1],
+                    'nav_timestamp': nav_timestamp,  # nav.py的原始时间戳
+                    'nav_time_unix': nav_time_unix,  # 转换为Unix时间戳用于排序
+                    'icao': icao,
                     'latitude': float(parts[2]),
                     'longitude': float(parts[3]),
                     'altitude': int(parts[4]),
@@ -171,27 +184,29 @@ class SafeADSBDataReader:
                     'enu_e': float(parts[8]),
                     'enu_n': float(parts[9]),
                     'enu_u': float(parts[10]),
-                    'last_seen': time.time()
+                    'last_seen': time.time(),  # 系统接收时间
+                    'timestamp': nav_timestamp  # 保持兼容性
                 }
-        except (ValueError, IndexError):
-            pass
-        
+        except (ValueError, IndexError) as e:
+            print(f"[ERROR] 解析日志行失败: {e}, line: {line[:100]}")
+
         return None
     
     def _cleanup_expired_data(self):
-        """清理过期数据"""
+        """清理过期数据 - 60分钟过期机制"""
         current_time = time.time()
         expired_icaos = []
-        
+
         for icao, data in self.data_cache.items():
-            if current_time - data.get('last_seen', 0) > 600:  # 10分钟过期
+            data_age = current_time - data.get('last_seen', 0)
+            if data_age > 3600:  # 60分钟过期
                 expired_icaos.append(icao)
-        
+
         for icao in expired_icaos:
             del self.data_cache[icao]
-        
+
         if expired_icaos:
-            print(f"清理了 {len(expired_icaos)} 个过期飞机数据")
+            print(f"清理了 {len(expired_icaos)} 个过期飞机数据（60分钟无更新）")
 
 
 # 测试函数
