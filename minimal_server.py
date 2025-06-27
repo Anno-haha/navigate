@@ -1207,6 +1207,7 @@ ${aircraft.enu_e ? `ENU坐标: E=${aircraft.enu_e.toFixed(0)}, N=${aircraft.enu_
 </html>'''
             
             self.wfile.write(html.encode('utf-8'))
+print('Web服务器启动成功，访问 http://127.0.0.1:8000/')
 
 if __name__ == '__main__':
     server = HTTPServer(('127.0.0.1', 8000), MinimalHandler)
